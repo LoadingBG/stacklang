@@ -42,6 +42,8 @@ $ java lang.Main <filename>
 ```
 if 1 2 < do
     1 print
+else
+    2 print
 end
 ( Output:
 1.0
@@ -49,8 +51,11 @@ end
 
 if 1 2 > do
     1 print
+else
+    2 print
 end
 ( Output:
+2.0
 )
 ```
 

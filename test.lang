@@ -1,6 +1,5 @@
-5
-while 1dup 0 > do
-    1dup print
-    1 -
+if 1 2 > do
+    1 print
+else
+    2 print
 end
-1drop

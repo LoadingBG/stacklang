@@ -3,6 +3,7 @@ package lang;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.function.BiPredicate;
 
@@ -10,6 +11,7 @@ import lang.opcode.ConditionalJumpOpCode;
 import lang.opcode.InvokeFunctionOpCode;
 import lang.opcode.OpCode;
 import lang.token.DoToken;
+import lang.token.ElseToken;
 import lang.token.EndToken;
 import lang.token.IdentifierToken;
 import lang.token.IfToken;
@@ -74,6 +76,65 @@ public class Parser {
         return tokens;
     }
 
+    private static List<InvokeFunctionOpCode> compileIfBlock(Token start, Queue<Token> tokens, String filename) {
+        List<OpCode> opcodes = new ArrayList<>();
+        while (!tokens.isEmpty()) {
+            Token token = tokens.remove();
+            if (token instanceof NumberToken) {
+                NumberToken t = (NumberToken) token;
+                opcodes.add(new InvokeFunctionOpCode((stack, _env) -> stack.push(t.number())));
+            } else if (token instanceof IdentifierToken) {
+                IdentifierToken t = (IdentifierToken) token;
+                opcodes.add(new InvokeFunctionOpCode((stack, env) -> env.find(t.identifier()).getValue().accept(t.info(), stack, env)));
+            } else if (token instanceof DoToken) {
+                opcodes.add(compileBlock(token, tokens, false, filename));
+            } else if (token instanceof EndToken) {
+                List<InvokeFunctionOpCode> blocks = new ArrayList<>();
+                blocks.add(createExecutor(opcodes, false, false, filename));
+                return blocks;
+            } else if (token instanceof IfToken) {
+                tokens.remove();
+                opcodes.add(new ConditionalJumpOpCode(compileCondition(token, tokens, filename), 1));
+                if (tokens.isEmpty()) {
+                    Reporter.noBlock(token.info());
+                    throw new RuntimeException();
+                }
+                Token next = tokens.remove();
+                if (!(next instanceof DoToken)) {
+                    Reporter.noBlock(token.info());
+                    throw new RuntimeException();
+                }
+                List<InvokeFunctionOpCode> blocks = compileIfBlock(next, tokens, filename);
+                if (blocks.size() == 1) {
+                    opcodes.add(blocks.get(0));
+                } else {
+                    opcodes.add(blocks.get(0));
+                    opcodes.add(new ConditionalJumpOpCode((_stack, _env) -> true, 1));
+                    opcodes.add(blocks.get(1));
+                }
+            } else if (token instanceof ElseToken) {
+                List<InvokeFunctionOpCode> blocks = new ArrayList<>();
+                blocks.add(createExecutor(opcodes, false, false, filename));
+                blocks.add(compileBlock(token, tokens, false, filename));
+                return blocks;
+            } else if (token instanceof WhileToken) {
+                opcodes.add(new ConditionalJumpOpCode(compileCondition(token, tokens, filename), 2));
+                if (tokens.isEmpty()) {
+                    Reporter.noBlock(token.info());
+                    throw new RuntimeException();
+                }
+                opcodes.add(compileBlock(tokens.remove(), tokens, false, filename));
+                opcodes.add(new ConditionalJumpOpCode((_stack, _env) -> true, -3));
+            } else {
+                System.out.println("Unknown token type: " + token.getClass().getSimpleName());
+                throw new RuntimeException();
+            }
+        }
+
+        Reporter.unclosedBlock(start.info());
+        throw new RuntimeException();
+    }
+
     private static BiPredicate<Stack<Double>, Environment> compileCondition(Token start, Queue<Token> tokens, String filename) {
         List<OpCode> opcodes = new ArrayList<>();
         while (!tokens.isEmpty()) {
@@ -95,13 +156,29 @@ public class Parser {
                 Reporter.freeEnd(token.info());
                 throw new RuntimeException();
             } else if (token instanceof IfToken) {
-                tokens.remove();
-                opcodes.add(new ConditionalJumpOpCode(compileCondition(token, tokens, filename), 1));
+                BiPredicate<Stack<Double>, Environment> condition = compileCondition(token, tokens, filename);
                 if (tokens.isEmpty()) {
                     Reporter.noBlock(token.info());
                     throw new RuntimeException();
                 }
-                opcodes.add(compileBlock(tokens.remove(), tokens, false, filename));
+                Token next = tokens.remove();
+                if (!(next instanceof DoToken)) {
+                    Reporter.noBlock(token.info());
+                    throw new RuntimeException();
+                }
+                List<InvokeFunctionOpCode> blocks = compileIfBlock(next, tokens, filename);
+                if (blocks.size() == 1) {
+                    opcodes.add(new ConditionalJumpOpCode(condition, 1));
+                    opcodes.add(blocks.get(0));
+                } else {
+                    opcodes.add(new ConditionalJumpOpCode(condition, 2));
+                    opcodes.add(blocks.get(0));
+                    opcodes.add(new ConditionalJumpOpCode((_stack, _env) -> true, 1));
+                    opcodes.add(blocks.get(1));
+                }
+            } else if (token instanceof ElseToken) {
+                Reporter.freeElse(token.info());
+                throw new RuntimeException();
             } else if (token instanceof WhileToken) {
                 opcodes.add(new ConditionalJumpOpCode(compileCondition(token, tokens, filename), 2));
                 if (tokens.isEmpty()) {
@@ -115,7 +192,7 @@ public class Parser {
                 throw new RuntimeException();
             }
         }
-        System.out.println("Should be unreachable");
+        Reporter.noCondition(start.info());
         throw new RuntimeException();
     }
 
@@ -132,14 +209,35 @@ public class Parser {
             } else if (token instanceof DoToken) {
                 opcodes.add(compileBlock(token, tokens, false, filename));
             } else if (token instanceof EndToken) {
+                if (start == null) {
+                    Reporter.freeEnd(token.info());
+                    throw new RuntimeException();
+                }
                 return createExecutor(new ArrayList<>(opcodes), printStack, false, filename);
             } else if (token instanceof IfToken) {
-                opcodes.add(new ConditionalJumpOpCode(compileCondition(token, tokens, filename), 1));
+                BiPredicate<Stack<Double>, Environment> condition = compileCondition(token, tokens, filename);
                 if (tokens.isEmpty()) {
                     Reporter.noBlock(token.info());
                     throw new RuntimeException();
                 }
-                opcodes.add(compileBlock(tokens.remove(), tokens, false, filename));
+                Token next = tokens.remove();
+                if (!(next instanceof DoToken)) {
+                    Reporter.noBlock(token.info());
+                    throw new RuntimeException();
+                }
+                List<InvokeFunctionOpCode> blocks = compileIfBlock(next, tokens, filename);
+                if (blocks.size() == 1) {
+                    opcodes.add(new ConditionalJumpOpCode(condition, 1));
+                    opcodes.add(blocks.get(0));
+                } else {
+                    opcodes.add(new ConditionalJumpOpCode(condition, 2));
+                    opcodes.add(blocks.get(0));
+                    opcodes.add(new ConditionalJumpOpCode((_stack, _env) -> true, 1));
+                    opcodes.add(blocks.get(1));
+                }
+            } else if (token instanceof ElseToken) {
+                Reporter.freeElse(token.info());
+                throw new RuntimeException();
             } else if (token instanceof WhileToken) {
                 opcodes.add(new ConditionalJumpOpCode(compileCondition(token, tokens, filename), 2));
                 if (tokens.isEmpty()) {
@@ -163,16 +261,17 @@ public class Parser {
 
     private static InvokeFunctionOpCode createExecutor(List<OpCode> opcodes, boolean printStack, boolean reportUnhandled, String filename) {
         return new InvokeFunctionOpCode((stack, env) -> {
+            Environment localEnv = new Environment(env);
             int opPtr = 0;
             while (opPtr < opcodes.size()) {
                 OpCode opcode = opcodes.get(opPtr);
                 if (opcode instanceof InvokeFunctionOpCode) {
                     InvokeFunctionOpCode o = (InvokeFunctionOpCode) opcode;
-                    o.fn().accept(stack, env);
+                    o.fn().accept(stack, localEnv);
                     opPtr = opcode.nextInstruction(opPtr);
                 } else if (opcode instanceof ConditionalJumpOpCode) {
                     ConditionalJumpOpCode o = (ConditionalJumpOpCode) opcode;
-                    if (o.toJumpTest().test(stack, env)) {
+                    if (o.toJumpTest().test(stack, localEnv)) {
                         opPtr = opcode.nextInstruction(opPtr);
                     } else {
                         ++opPtr;

@@ -40,11 +40,27 @@ public class Reporter {
         );
     }
 
+    public static void freeElse(TokenInfo elseInfo) {
+        report(
+            elseInfo,
+            "An `else` without a corresponding `if` was found.",
+            "Consider removing this `else`"
+        );
+    }
+
     public static void noBlock(TokenInfo startInfo) {
         report(
             startInfo,
             "A `" + startInfo.raw() + "` which requires a block doesn't have one.",
             "Consider adding a `do-end` construction after the condition"
+        );
+    }
+
+    public static void noCondition(TokenInfo startInfo) {
+        report(
+            startInfo,
+            "The word `" + startInfo.raw() + "` expected a condition but didn't find one.",
+            "Add a condition to this `" + startInfo.raw() + "` keyword"
         );
     }
 
@@ -76,7 +92,7 @@ public class Reporter {
             "%s |%s%s %s%n%n",
             tokenInfo.filename(), tokenInfo.row(), tokenInfo.col(), message,
             " ".repeat(colLen),
-            tokenInfo.col(), tokenInfo.line(),
+            tokenInfo.row(), tokenInfo.line(),
             " ".repeat(colLen), " ".repeat(tokenInfo.col()), "^".repeat(tokenInfo.raw().length()), description
         );
     }
